@@ -1,0 +1,14 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.paperwise_data/
+backend/.venv/
+backend/chroma_db/
+__pycache__/
+*.pyc
+

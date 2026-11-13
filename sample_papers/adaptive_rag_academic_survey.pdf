@@ -1,0 +1,276 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R] /Count 6 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2380 >>
+stream
+BT
+/F1 10.5 Tf
+54 745 Td
+15 TL
+(Adaptive Retrieval-Augmented Generation for Resource-Constrained Academic Question Answering) Tj T*
+(Authors: Dr. Ananya Rao, Prof. Vikram Menon, and Siddharth Kulkarni) Tj T*
+(Department of Computer Science & Engineering, Indian Institute of Technology Madras) Tj T*
+(Published in: Proceedings of the International Conference on Applied Agentic Systems \(ICAAS 2025\)) Tj T*
+() Tj T*
+(ABSTRACT) Tj T*
+(Large Language Models \(LLMs\) demonstrate strong generative fluency yet remain prone to factual) Tj T*
+(hallucinations when queried on specialized academic literature not present in pre-training corpora.) Tj T*
+(Standard Retrieval-Augmented Generation \(RAG\) mitigates this issue by retrieving fixed top-k text) Tj T*
+(chunks for every incoming query. However, static retrieval introduces unnecessary latency on simple) Tj T*
+(queries and insufficient context coverage on multi-hop technical questions.) Tj T*
+() Tj T*
+(In this paper, we propose ARAG-Lite \(Adaptive Retrieval-Augmented Generation for Academic) Tj T*
+(Documents\), a multi-agent pipeline combining lightweight intent classification, dynamic chunk) Tj T*
+(sizing, and ReAct-style self-reflection. Evaluated across 420 peer-reviewed computer science) Tj T*
+(papers and 1,800 examiner-style viva questions, ARAG-Lite improves citation faithfulness by 18.4%) Tj T*
+(over fixed-k RAG while reducing average token overhead by 27.2% and end-to-end latency by 31.5%.) Tj T*
+() Tj T*
+(1. INTRODUCTION) Tj T*
+(Academic researchers, postgraduate students, and examiners routinely process dense 10-to-30 page) Tj T*
+(research manuscripts under tight time constraints. Preparing structured lecture slides and viva) Tj T*
+(voce defense questions manually requires extracting problem formulations, algorithmic workflows,) Tj T*
+(empirical tables, and limitations without distorting original author claims.) Tj T*
+() Tj T*
+(Conventional summarization pipelines feed entire documents into long-context models, which leads) Tj T*
+(to "lost-in-the-middle" degradation when key experimental baselines reside on intermediate pages.) Tj T*
+(Conversely, naive RAG architectures trigger vector similarity searches indiscriminately—even when) Tj T*
+(a user requests a high-level structural synthesis—and fail to verify whether retrieved chunks) Tj T*
+(genuinely support generated claims.) Tj T*
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2606 >>
+stream
+BT
+/F1 10.5 Tf
+54 745 Td
+15 TL
+(1.1 Research Problem Statement) Tj T*
+(Existing document-grounded assistants suffer from three interconnected bottlenecks:) Tj T*
+(1\) Hallucinated Extrapolation: Generative models frequently invent baseline numbers, dataset) Tj T*
+(sizes, or future work items that do not appear in the source manuscript.) Tj T*
+(2\) Static Retrieval Blindness: Fixed top-k cosine similarity retrieval cannot distinguish between) Tj T*
+(global structural queries \(e.g., summarizing contributions\) and localized factoid queries \(e.g.,) Tj T*
+(checking Table 2 hyperparameter values\).) Tj T*
+(3\) Unstructured Pedagogical Output: Standard Q&A systems fail to scaffold explanations across) Tj T*
+(cognitive difficulty tiers suitable for viva examination preparation.) Tj T*
+() Tj T*
+(1.2 Research Objectives) Tj T*
+(The primary objectives of this work are:) Tj T*
+(- Objective 1: Design an intent-driven multi-agent router that classifies academic tasks into) Tj T*
+(  summarization, concept extraction, slide synthesis, viva generation, and grounded Q&A.) Tj T*
+(- Objective 2: Implement page-aware overlapping chunking paired with dense vector indexing) Tj T*
+(  to preserve exact provenance metadata \([Page X]\) for every generated claim.) Tj T*
+(- Objective 3: Introduce a ReAct-based faithfulness verification loop that rejects unsupported) Tj T*
+(  claims when cosine similarity falls below an empirical grounding threshold \(tau = 0.42\).) Tj T*
+(- Objective 4: Benchmark ARAG-Lite against Zero-Shot LLM and Fixed-K RAG baselines.) Tj T*
+() Tj T*
+(2. LITERATURE REVIEW) Tj T*
+(Lewis et al. \(2020\) formalized Retrieval-Augmented Generation by coupling parametric sequence-to-) Tj T*
+(sequence models with non-parametric dense passage retrieval over Wikipedia. Subsequent work by) Tj T*
+(Asai et al. \(2023\) introduced Self-RAG, training models to emit reflection tokens indicating) Tj T*
+(retrieval necessity. While Self-RAG improves factuality on open-domain QA, it requires fine-tuning) Tj T*
+(7B-13B parameter weights, making deployment impractical in university labs.) Tj T*
+(Gao et al. \(2024\) surveyed modular RAG architectures and highlighted query routing and) Tj T*
+(reranking as decisive factors in domain-specific precision. Building on LangChain Expression) Tj T*
+(Language \(LCEL\), recent agentic workflows compose PromptTemplates, structured output parsers,) Tj T*
+(and vector stores without weight fine-tuning. However, prior systems lack unified multi-agent) Tj T*
+(orchestration tailored specifically to academic slide generation and viva evaluation.) Tj T*
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 1968 >>
+stream
+BT
+/F1 10.5 Tf
+54 745 Td
+15 TL
+(3. PROPOSED METHODOLOGY & SYSTEM ARCHITECTURE) Tj T*
+(ARAG-Lite operates as a four-stage deterministic-plus-agentic pipeline:) Tj T*
+() Tj T*
+(Stage 1: Page-Aware PDF Ingestion & Recursive Chunking) Tj T*
+(Incoming PDF documents are parsed page-by-page using PyMuPDF \(fitz\) to retain exact physical) Tj T*
+(page indices. Text is normalized to strip running headers and segmented using a recursive) Tj T*
+(character splitter with chunk size C = 900 characters and overlap O = 150 characters. Each) Tj T*
+(chunk stores metadata: {document_id, page_number, chunk_index, section_hint}.) Tj T*
+() Tj T*
+(Stage 2: Dense Vector Embedding & Isolated Collection Indexing) Tj T*
+(Each chunk is encoded into a 768-dimensional dense vector using Gemini Embedding-2 \(or) Tj T*
+(all-MiniLM-L6-v2 for offline deployments\) and persisted inside a document-isolated ChromaDB) Tj T*
+(collection. Isolation guarantees zero cross-paper contamination when multiple papers are active.) Tj T*
+() Tj T*
+(Stage 3: Few-Shot Intent Detection & Agent Routing) Tj T*
+(User requests pass through an LCEL Intent Router \(FewShotPromptTemplate | LLM | JSONParser\)) Tj T*
+(which classifies the request into six intents: SUMMARIZE_PAPER, EXTRACT_CONCEPTS,) Tj T*
+(GENERATE_SLIDES, GENERATE_VIVA, ASK_PAPER_QUESTION, and EVALUATE_VIVA_ANSWER.) Tj T*
+() Tj T*
+(Stage 4: Specialized LCEL Agents & ReAct Grounding Loop) Tj T*
+(- Summarizer Agent: Synthesizes abstract, problem statement, objectives, methodology, and) Tj T*
+(  conclusions using map-reduce section prompts.) Tj T*
+(- Concept-Extractor Agent: Extracts algorithms, formal definitions, contributions, and glossary.) Tj T*
+(- Slide-Generator Agent: Produces 8-12 structured 16:9 slides with speaker notes and charts.) Tj T*
+(- Viva Agent: Generates multi-difficulty examiner questions and evaluates student responses) Tj T*
+(  against retrieved ground-truth passages using rubric-guided reflection.) Tj T*
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 1892 >>
+stream
+BT
+/F1 10.5 Tf
+54 745 Td
+15 TL
+(3.1 ReAct Faithfulness Reflection Algorithm) Tj T*
+(For every user question Q in Research Paper Chat, the RAG Chat Agent executes a 4-step loop:) Tj T*
+(Step 1 \(Thought\): Determine whether Q requires localized evidence retrieval or document metadata.) Tj T*
+(Step 2 \(Action\): Query ChromaDB collection with cosine similarity search for top-k = 5 chunks.) Tj T*
+(Step 3 \(Observation\): Inspect retrieved similarity scores S = {s_1, ..., s_k} and page tags.) Tj T*
+(Step 4 \(Reflection & Response\): If max\(S\) < 0.35 or evidence is absent, explicitly state that) Tj T*
+(the paper does not contain the requested information. Otherwise synthesize an answer citing) Tj T*
+(exact page references [Page P].) Tj T*
+() Tj T*
+(4. IMPLEMENTATION DETAILS) Tj T*
+(The reference prototype is implemented with a FastAPI REST backend \(Python 3.11\) and a React) Tj T*
+(TypeScript client. Prompt orchestration uses LangChain Expression Language \(LCEL\) chains of the) Tj T*
+(form `prompt | chat_model | pydantic_output_parser`. PowerPoint decks are compiled natively) Tj T*
+(in 16:9 widescreen format \(13.333 x 7.5 inches\) using python-pptx with speaker notes attached) Tj T*
+(to each slide XML node. The embedding batch processor enforces exponential backoff \(base 500ms,) Tj T*
+(max 3 retries\) to handle API rate limits gracefully.) Tj T*
+() Tj T*
+(5. EXPERIMENTAL RESULTS AND DISCUSSION) Tj T*
+(We evaluated ARAG-Lite on the ScholarBench-420 dataset comprising 420 arXiv papers across) Tj T*
+(Machine Learning, Distributed Systems, and Cybersecurity, paired with 1,800 human-verified) Tj T*
+(viva questions. Three configurations were compared:) Tj T*
+(1\) Zero-Shot Full-Text LLM \(no retrieval routing\)) Tj T*
+(2\) Fixed-K Standard RAG \(k = 4, no ReAct reflection\)) Tj T*
+(3\) ARAG-Lite \(Intent Router + Dynamic k = 5 + ReAct Faithfulness Guard\)) Tj T*
+ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 13 0 R >>
+endobj
+13 0 obj
+<< /Length 2194 >>
+stream
+BT
+/F1 10.5 Tf
+54 745 Td
+15 TL
+(5.1 Quantitative Benchmark Comparison \(Table 1\)) Tj T*
+(Metric                          Zero-Shot LLM    Fixed-K RAG    ARAG-Lite \(Proposed\)) Tj T*
+(Citation Faithfulness \(%\)            71.2            79.8            94.5) Tj T*
+(Answer Completeness \(%\)              82.4            80.1            91.8) Tj T*
+(Hallucination Rate \(%\)               19.6            11.4             3.2) Tj T*
+(Average End-to-End Latency \(s\)        4.8             3.5             2.4) Tj T*
+(Token Overhead per Query \(tokens\)   6,420           3,810           2,774) Tj T*
+() Tj T*
+(As shown in Table 1, ARAG-Lite achieves 94.5% citation faithfulness \(+14.7 percentage points) Tj T*
+(over Fixed-K RAG, representing an 18.4% relative improvement\) while cutting hallucination rate) Tj T*
+(from 19.6% \(Zero-Shot\) and 11.4% \(Fixed-K RAG\) down to 3.2%. Latency drops by 31.5% compared) Tj T*
+(to Fixed-K RAG because structural queries bypass unnecessary vector search reranking.) Tj T*
+() Tj T*
+(5.2 Ablation Study on Viva Evaluation Accuracy) Tj T*
+(We asked 30 university faculty examiners to blind-rate 300 student viva answers graded by) Tj T*
+(ARAG-Lite on a 0-10 scale. Pearson correlation between human examiner scores and ARAG-Lite) Tj T*
+(scores reached r = 0.89 \(p < 0.001\) when rubric-guided few-shot reflection was enabled, versus) Tj T*
+(r = 0.71 without RAG ground-truth chunk injection.) Tj T*
+() Tj T*
+(6. ADVANTAGES AND LIMITATIONS) Tj T*
+(Advantages:) Tj T*
+(- Zero model fine-tuning required; operates purely via modular LCEL prompt chains and RAG.) Tj T*
+(- High citation verifiability with explicit page-level provenance.) Tj T*
+(- Automated generation of editable 16:9 PowerPoint presentations and tiered viva banks.) Tj T*
+(Limitations:) Tj T*
+(- Scanned image-only PDFs without an embedded OCR text layer yield empty extraction.) Tj T*
+(- Complex multi-column mathematical equations in LaTeX PDFs may lose spatial symbol alignment) Tj T*
+(  during plain-text extraction.) Tj T*
+(- ChromaDB cosine similarity relies on lexical-semantic overlap and can miss implicit visual) Tj T*
+(  trends encoded solely inside raster figures.) Tj T*
+ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 15 0 R >>
+endobj
+15 0 obj
+<< /Length 1935 >>
+stream
+BT
+/F1 10.5 Tf
+54 745 Td
+15 TL
+(7. FUTURE SCOPE) Tj T*
+(Future extensions of ARAG-Lite will focus on three concrete directions:) Tj T*
+(1\) Multimodal Figure & Chart Parsing: Integrating vision-language embeddings to index plots,) Tj T*
+(   circuit diagrams, and confusion matrices directly from PDF page renders.) Tj T*
+(2\) Hybrid BM25 + Dense Reciprocal Rank Fusion: Combining sparse keyword matching for rare) Tj T*
+(   mathematical symbols and acronyms with dense semantic retrieval.) Tj T*
+(3\) Interactive Voice Viva Simulator: Extending the Viva Practice module with low-latency) Tj T*
+(   real-time speech recognition and spoken follow-up probing.) Tj T*
+() Tj T*
+(8. CONCLUSION) Tj T*
+(This paper presented ARAG-Lite, an adaptive multi-agent RAG framework designed for automated) Tj T*
+(research paper comprehension, presentation synthesis, and viva preparation. By combining) Tj T*
+(page-aware PDF chunking, isolated ChromaDB vector collections, few-shot intent routing,) Tj T*
+(and ReAct faithfulness verification, ARAG-Lite achieves 94.5% citation faithfulness and 3.2%) Tj T*
+(hallucination rate while reducing token consumption by 27.2%.) Tj T*
+() Tj T*
+(REFERENCES) Tj T*
+([1] Lewis, P., Perez, E., Piktus, A., et al. \(2020\). Retrieval-Augmented Generation for) Tj T*
+(    Knowledge-Intensive NLP Tasks. Advances in Neural Information Processing Systems \(NeurIPS\).) Tj T*
+([2] Asai, A., Wu, Z., Wang, Y., Sil, A., & Hajishirzi, H. \(2023\). Self-RAG: Learning to) Tj T*
+(    Retrieve, Generate, and Critique through Self-Reflection. ICLR 2024.) Tj T*
+([3] Gao, Y., Xiong, Y., Gao, X., et al. \(2024\). Retrieval-Augmented Generation for Large) Tj T*
+(    Language Models: A Survey. arXiv preprint arXiv:2312.10997.) Tj T*
+([4] Yao, S., Zhao, J., Yu, D., et al. \(2023\). ReAct: Synergizing Reasoning and Acting in) Tj T*
+(    Language Models. International Conference on Learning Representations \(ICLR\).) Tj T*
+ET
+endstream
+endobj
+xref
+0 16
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000148 00000 n 
+0000000218 00000 n 
+0000000344 00000 n 
+0000002776 00000 n 
+0000002902 00000 n 
+0000005560 00000 n 
+0000005686 00000 n 
+0000007706 00000 n 
+0000007834 00000 n 
+0000009779 00000 n 
+0000009907 00000 n 
+0000012154 00000 n 
+0000012282 00000 n 
+trailer
+<< /Size 16 /Root 1 0 R >>
+startxref
+14270
+%%EOF

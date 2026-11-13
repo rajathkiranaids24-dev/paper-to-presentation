@@ -1,0 +1,6 @@
+{
+  "name": "PAPERWISE AI",
+  "description": "Agentic AI Research Paper to Presentation & Viva Preparation System with Gemini, LCEL pipelines, Vector RAG, and PowerPoint generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
