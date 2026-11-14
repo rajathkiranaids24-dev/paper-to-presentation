@@ -1,0 +1,10 @@
+streamlit==1.41.1
+pydantic==2.10.4
+python-dotenv==1.0.1
+pymupdf==1.25.1
+python-pptx==1.0.2
+langchain==0.3.14
+langchain-core==0.3.28
+langchain-google-genai==2.0.8
+langchain-text-splitters==0.3.4
+chromadb==0.5.23
