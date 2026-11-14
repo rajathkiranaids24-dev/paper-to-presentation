@@ -57,6 +57,31 @@ npm run dev
 
 ---
 
+## Running Locally (Option C: Streamlit UI + FastAPI or Node Backend)
+
+`streamlit_app.py` provides the complete 12-page PAPERWISE AI interface in Streamlit and works with **either** the Python FastAPI backend (`http://localhost:8000`) or the Node.js Express backend (`http://localhost:3000`):
+
+```bash
+# 1. Install Python dependencies (includes streamlit, fastapi, langchain, chromadb, pymupdf, python-pptx)
+cd backend
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Add GEMINI_API_KEY inside backend/.env
+
+# 2. Start the FastAPI backend on port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# 3. In another terminal (with the same venv active), launch Streamlit
+cd ..
+streamlit run streamlit_app.py
+```
+
+Open `http://localhost:8501` (or switch the **Backend Endpoint** selector in the Streamlit sidebar between `http://localhost:8000` and `http://localhost:3000`).
+
+---
+
 ## REST API Reference
 
 | Method | Endpoint | Description |
