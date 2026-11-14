@@ -38,6 +38,12 @@ from backend.services.docx_generator import build_summary_docx_bytes, build_viva
 from backend.services.intent_router import IntentRouterService
 from backend.services.pdf_processor import chunk_pages, extract_pdf_pages
 from backend.services.pptx_generator import build_pptx_bytes
+from backend.utils.config import (
+    get_chat_llm,
+    get_chat_model_name,
+    get_embedding_model_name,
+    has_gemini_api_key,
+)
 
 load_dotenv()
 
@@ -62,17 +68,15 @@ SETTINGS: Dict[str, Any] = {
     "topK": int(os.getenv("TOP_K", "5")),
     "defaultSlideCount": 10,
     "defaultSlideTheme": "oxford-navy",
-    "activeModel": os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash"),
-    "embeddingModel": os.getenv("EMBEDDING_BACKEND", "gemini"),
+    "activeModel": get_chat_model_name(),
+    "embeddingModel": get_embedding_model_name(),
 }
 
 
 def get_llm() -> ChatGoogleGenerativeAI:
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
+    if not has_gemini_api_key():
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured in backend/.env")
-    model_name = SETTINGS.get("activeModel", "gemini-2.5-flash")
-    return ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key, temperature=0.2)
+    return get_chat_llm(model_name=SETTINGS.get("activeModel"), temperature=0.2)
 
 
 _store: Optional[PaperwiseChromaStore] = None

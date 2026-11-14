@@ -3,6 +3,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 from backend.prompts.templates import SLIDE_PROMPT
+from backend.utils.config import get_chat_llm
 
 
 class ChartPoint(BaseModel):
@@ -31,9 +32,10 @@ class SlideDeckModel(BaseModel):
 
 
 class SlideGeneratorAgent:
-    def __init__(self, llm: ChatGoogleGenerativeAI) -> None:
+    def __init__(self, llm: Optional[ChatGoogleGenerativeAI] = None) -> None:
+        resolved_llm = llm or get_chat_llm()
         self.parser = PydanticOutputParser(pydantic_object=SlideDeckModel)
-        self.chain = SLIDE_PROMPT | llm | self.parser
+        self.chain = SLIDE_PROMPT | resolved_llm | self.parser
 
     def run(
         self,

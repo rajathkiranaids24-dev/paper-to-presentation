@@ -9,7 +9,7 @@ An Agentic AI academic assistant that ingests PDF research papers, indexes page-
 This repository supports **single-service Streamlit Community Cloud deployment** as well as the existing Node.js and FastAPI runtimes:
 
 1. **Single-Service Streamlit Cloud App (`streamlit_app.py`) — Recommended for One Public URL**:
-   Runs the entire pipeline **in-process** inside the Streamlit Python runtime (`Streamlit UI → backend/services/paperwise_service.py → LangChain LCEL Agents → Google Gemini API + models/gemini-embedding-001 → ChromaDB RAG`) with **zero `localhost` HTTP requests** and **no separate FastAPI or Node.js server**.
+   Runs the entire pipeline **in-process** inside the Streamlit Python runtime (`Streamlit UI → backend/services/paperwise_service.py → LangChain LCEL Agents → Google Gemini API (`gemini-3.8-flash` + `gemini-embedding-001`) → ChromaDB RAG`) with **zero `localhost` HTTP requests** and **no separate FastAPI or Node.js server**.
 2. **Live Full-Stack Preview Runtime (`server.ts` on Port `3000`)**:
    Node.js + Express + React + TypeScript runtime for environments without Python `pip`.
 3. **Local FastAPI + React Runtime (`/backend/main.py`)**:
@@ -28,8 +28,8 @@ This repository supports **single-service Streamlit Community Cloud deployment**
 4. Open **Advanced settings → Secrets** and add:
    ```toml
    GEMINI_API_KEY = "your_google_gemini_api_key"
-   GEMINI_CHAT_MODEL = "gemini-2.5-flash"
-   GEMINI_EMBEDDING_MODEL = "models/gemini-embedding-001"
+   GEMINI_CHAT_MODEL = "gemini-3.8-flash"
+   GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
    ```
 5. Click **Deploy**.
 
@@ -48,7 +48,7 @@ Open `http://localhost:8501`.
 
 ## Seven Mandatory Agentic AI Acceptance Criteria
 
-1. **LLM Integration**: Google Gemini integration (`gemini-2.5-flash` + `models/gemini-embedding-001` in Python, `st.secrets["GEMINI_API_KEY"]`) with no client-side API key exposure.
+1. **LLM Integration**: Google Gemini integration (`gemini-3.8-flash` + `gemini-embedding-001` in Python, `st.secrets["GEMINI_API_KEY"]`) with no client-side API key exposure.
 2. **Interactive GUI**: 12-section academic SaaS dashboard (Dashboard, Upload Paper, AI Summary, Concept Extractor, Presentation Generator, Viva Preparation, Viva Practice, Research Paper Chat, Agent Activity Monitor, RAG Inspector, Prompt Engineering, Settings).
 3. **Prompt Engineering**: Dedicated Prompt Engineering page displaying live System Prompts, User `PromptTemplate`s, Zero-Shot & Few-Shot examples, and ReAct reflection rules.
 4. **LangChain Core Components**: Modular `PromptTemplate | LLM | OutputParser` LCEL pipelines across all four agents (`backend/agents/*.py`).

@@ -22,6 +22,7 @@ from backend.prompts.templates import (
     VIVA_EVAL_PROMPT,
     VIVA_PROMPT,
 )
+from backend.rag.embeddings import PaperwiseEmbeddingProvider
 from backend.rag.retriever import PaperwiseRetrieverService
 from backend.rag.vector_store import PaperwiseChromaStore
 from backend.services.docx_generator import build_summary_docx_bytes, build_viva_docx_bytes
@@ -29,9 +30,11 @@ from backend.services.intent_router import IntentRouterService
 from backend.services.pdf_processor import chunk_pages, extract_pdf_pages
 from backend.services.pptx_generator import build_pptx_bytes
 from backend.utils.config import (
+    GEMINI_CHAT_MODEL,
+    GEMINI_EMBEDDING_MODEL,
+    get_chat_llm,
     get_chat_model_name,
     get_embedding_model_name,
-    get_gemini_api_key,
 )
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -68,19 +71,35 @@ def _format_gemini_error(exc: Exception, operation: str) -> RuntimeError:
     if "404" in lower or "not found" in lower:
         return RuntimeError(
             f"{operation} failed: Configured Gemini model was not found ({msg}). "
-            "Verify GEMINI_CHAT_MODEL and GEMINI_EMBEDDING_MODEL."
+            f"Expected chat={GEMINI_CHAT_MODEL}, embedding={GEMINI_EMBEDDING_MODEL}."
         )
     return RuntimeError(f"{operation} failed: {msg}")
 
 
 def get_llm(model_name: Optional[str] = None, temperature: float = 0.2) -> ChatGoogleGenerativeAI:
-    api_key = get_gemini_api_key()
-    chosen_model = model_name or get_chat_model_name()
-    return ChatGoogleGenerativeAI(
-        model=chosen_model,
-        google_api_key=api_key,
-        temperature=temperature,
-    )
+    return get_chat_llm(model_name=model_name, temperature=temperature)
+
+
+def verify_gemini_models() -> Dict[str, Any]:
+    """Run a lightweight connectivity check against both Gemini chat and embedding models."""
+    chat_model = get_chat_model_name()
+    emb_model = get_embedding_model_name()
+    try:
+        llm = get_llm(model_name=chat_model, temperature=0.0)
+        chat_res = llm.invoke("Reply with OK.")
+        chat_text = str(getattr(chat_res, "content", chat_res)).strip()
+
+        embedder = PaperwiseEmbeddingProvider(model_name=emb_model)
+        vec = embedder.embed_query("Paperwise connectivity check")
+        return {
+            "ok": True,
+            "chatModel": chat_model,
+            "chatReply": chat_text[:40],
+            "embeddingModel": embedder.model_name,
+            "embeddingDimensions": len(vec),
+        }
+    except Exception as exc:
+        raise _format_gemini_error(exc, "Gemini model verification") from exc
 
 
 def _append_log(ws: Dict[str, Any], log_entry: Dict[str, Any]) -> None:

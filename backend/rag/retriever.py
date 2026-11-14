@@ -4,14 +4,20 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from backend.prompts.templates import RAG_CHAT_PROMPT
 from backend.rag.vector_store import PaperwiseChromaStore
+from backend.utils.config import get_chat_llm
 
 
 class PaperwiseRetrieverService:
     """ReAct-style Agentic RAG retriever and grounded QA chain."""
 
-    def __init__(self, store: PaperwiseChromaStore, llm: ChatGoogleGenerativeAI) -> None:
-        self.store = store
-        self.chain = RAG_CHAT_PROMPT | llm | StrOutputParser()
+    def __init__(
+        self,
+        store: Optional[PaperwiseChromaStore] = None,
+        llm: Optional[ChatGoogleGenerativeAI] = None,
+    ) -> None:
+        resolved_llm = llm or get_chat_llm()
+        self.store = store or PaperwiseChromaStore()
+        self.chain = RAG_CHAT_PROMPT | resolved_llm | StrOutputParser()
 
     @staticmethod
     def needs_retrieval(question: str) -> bool:

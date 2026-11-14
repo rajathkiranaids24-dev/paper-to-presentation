@@ -1,9 +1,10 @@
 import time
-from typing import Literal
+from typing import Literal, Optional
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from backend.prompts.templates import INTENT_ROUTER_PROMPT
+from backend.utils.config import get_chat_llm
 
 
 class IntentDecision(BaseModel):
@@ -24,9 +25,10 @@ class IntentDecision(BaseModel):
 class IntentRouterService:
     """Few-Shot LCEL Intent Detection & Routing Service."""
 
-    def __init__(self, llm: ChatGoogleGenerativeAI) -> None:
+    def __init__(self, llm: Optional[ChatGoogleGenerativeAI] = None) -> None:
+        resolved_llm = llm or get_chat_llm()
         self.parser = JsonOutputParser(pydantic_object=IntentDecision)
-        self.chain = INTENT_ROUTER_PROMPT | llm | self.parser
+        self.chain = INTENT_ROUTER_PROMPT | resolved_llm | self.parser
 
     def classify(self, user_query: str) -> dict:
         start = time.time()

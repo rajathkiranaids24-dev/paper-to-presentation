@@ -1,19 +1,21 @@
-from typing import List
+from typing import List, Optional
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from backend.utils.config import get_embedding_model_name, get_gemini_api_key
+from backend.utils.config import (
+    get_embedding_api_model_name,
+    get_gemini_api_key,
+    resolve_embedding_model_name,
+)
 
 
 class PaperwiseEmbeddingProvider:
-    """Provides dense embeddings using a supported Gemini embedding model (gemini-embedding-001)."""
+    """Provides dense embeddings using the centralized Gemini embedding model (gemini-embedding-001)."""
 
-    def __init__(self) -> None:
+    def __init__(self, model_name: Optional[str] = None) -> None:
         api_key = get_gemini_api_key()
-        self.model_name = get_embedding_model_name()
-        if not self.model_name.startswith("models/"):
-            self.model_name = f"models/{self.model_name}"
-
+        self.model_name = resolve_embedding_model_name(model_name)
+        self.api_model_name = get_embedding_api_model_name(self.model_name)
         self._gemini_embeddings = GoogleGenerativeAIEmbeddings(
-            model=self.model_name,
+            model=self.api_model_name,
             google_api_key=api_key,
         )
 
@@ -21,7 +23,6 @@ class PaperwiseEmbeddingProvider:
         if not texts:
             return []
         try:
-            # Batch in safe chunks to respect API payload limits
             batch_size = 32
             all_vectors: List[List[float]] = []
             for i in range(0, len(texts), batch_size):

@@ -30,6 +30,7 @@ from backend.services.paperwise_service import (
     run_summarizer,
     run_viva_evaluation,
     run_viva_generator,
+    verify_gemini_models,
 )
 from backend.utils.config import (
     get_chat_model_name,
@@ -123,6 +124,8 @@ if "viva_practice_idx" not in st.session_state:
     st.session_state.viva_practice_idx = 0
 if "settings" not in st.session_state:
     st.session_state.settings = dict(DEFAULT_SETTINGS)
+st.session_state.settings["activeModel"] = get_chat_model_name()
+st.session_state.settings["embeddingModel"] = get_embedding_model_name()
 if "last_route_notice" not in st.session_state:
     st.session_state.last_route_notice = None
 
@@ -1064,6 +1067,24 @@ elif page == "Settings":
                 }
             )
             st.success("Preferences updated for this session.")
+
+    st.divider()
+    st.subheader("Gemini Model Configuration Check")
+    st.caption(
+        f"Active Chat Model: `{get_chat_model_name()}` · "
+        f"Active Embedding Model: `{get_embedding_model_name()}`"
+    )
+    if st.button("Verify Gemini Chat & Embedding Connection"):
+        if render_api_key_guard():
+            with st.spinner("Verifying Gemini chat and embedding models..."):
+                try:
+                    info = verify_gemini_models()
+                    st.success(
+                        f"Connected! Chat `{info['chatModel']}` replied `{info['chatReply']}` · "
+                        f"Embedding `{info['embeddingModel']}` produced {info['embeddingDimensions']}-dim vector."
+                    )
+                except Exception as exc:
+                    st.error(str(exc))
 
     st.divider()
     st.subheader("Workspace Maintenance")

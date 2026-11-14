@@ -4,6 +4,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 from backend.prompts.templates import VIVA_EVAL_PROMPT, VIVA_PROMPT
 from backend.rag.vector_store import PaperwiseChromaStore
+from backend.utils.config import get_chat_llm
 
 
 class VivaQuestionModel(BaseModel):
@@ -38,12 +39,17 @@ class VivaEvalModel(BaseModel):
 
 
 class VivaAgent:
-    def __init__(self, llm: ChatGoogleGenerativeAI, store: PaperwiseChromaStore) -> None:
-        self.store = store
+    def __init__(
+        self,
+        llm: Optional[ChatGoogleGenerativeAI] = None,
+        store: Optional[PaperwiseChromaStore] = None,
+    ) -> None:
+        resolved_llm = llm or get_chat_llm()
+        self.store = store or PaperwiseChromaStore()
         self.gen_parser = PydanticOutputParser(pydantic_object=VivaBankModel)
         self.eval_parser = PydanticOutputParser(pydantic_object=VivaEvalModel)
-        self.gen_chain = VIVA_PROMPT | llm | self.gen_parser
-        self.eval_chain = VIVA_EVAL_PROMPT | llm | self.eval_parser
+        self.gen_chain = VIVA_PROMPT | resolved_llm | self.gen_parser
+        self.eval_chain = VIVA_EVAL_PROMPT | resolved_llm | self.eval_parser
 
     def generate_questions(
         self, title: str, page_count: int, pages: List[dict], min_questions: int = 20

@@ -1,8 +1,9 @@
-from typing import List
+from typing import List, Optional
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 from backend.prompts.templates import CONCEPT_PROMPT
+from backend.utils.config import get_chat_llm
 
 
 class ConceptItem(BaseModel):
@@ -35,9 +36,10 @@ class ExtractedConceptsModel(BaseModel):
 
 
 class ConceptExtractorAgent:
-    def __init__(self, llm: ChatGoogleGenerativeAI) -> None:
+    def __init__(self, llm: Optional[ChatGoogleGenerativeAI] = None) -> None:
+        resolved_llm = llm or get_chat_llm()
         self.parser = PydanticOutputParser(pydantic_object=ExtractedConceptsModel)
-        self.chain = CONCEPT_PROMPT | llm | self.parser
+        self.chain = CONCEPT_PROMPT | resolved_llm | self.parser
 
     def run(self, title: str, page_count: int, pages: List[dict]) -> dict:
         pages_text = "\n\n".join(f"[PAGE {p['pageNumber']}]\n{p['text']}" for p in pages)
