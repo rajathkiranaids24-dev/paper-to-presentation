@@ -1,7 +1,0 @@
-streamlit
-fastapi
-uvicorn
-python-multipart
-python-pptx
-pymupdf
-google-generativeai
