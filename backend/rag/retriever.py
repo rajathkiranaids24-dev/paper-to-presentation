@@ -1,9 +1,9 @@
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
-from prompts.templates import RAG_CHAT_PROMPT
-from rag.vector_store import PaperwiseChromaStore
+from backend.prompts.templates import RAG_CHAT_PROMPT
+from backend.rag.vector_store import PaperwiseChromaStore
 
 
 class PaperwiseRetrieverService:
@@ -31,13 +31,19 @@ class PaperwiseRetrieverService:
         user_question: str,
         chat_history: List[Dict[str, str]],
         top_k: int = 5,
+        fallback_chunks: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         start = time.time()
         use_rag = self.needs_retrieval(user_question)
         retrieved_chunks: List[Dict[str, Any]] = []
 
         if use_rag:
-            res = self.store.query(document_id=document_id, query_text=user_question, top_k=top_k)
+            res = self.store.query(
+                document_id=document_id,
+                query_text=user_question,
+                top_k=top_k,
+                fallback_chunks=fallback_chunks,
+            )
             retrieved_chunks = res["chunks"]
             context_str = "\n\n---\n\n".join(
                 f"Chunk #{idx + 1} [Page {c['page_number']} | Score: {c['score']:.4f} | {c['section_hint']}]\n{c['text']}"

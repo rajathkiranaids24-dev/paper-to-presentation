@@ -2,7 +2,7 @@ from typing import List, Optional
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
-from prompts.templates import SLIDE_PROMPT
+from backend.prompts.templates import SLIDE_PROMPT
 
 
 class ChartPoint(BaseModel):

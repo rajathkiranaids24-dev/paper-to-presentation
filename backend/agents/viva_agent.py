@@ -1,9 +1,9 @@
-from typing import List, Literal
+from typing import Any, Dict, List, Literal, Optional
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
-from prompts.templates import VIVA_EVAL_PROMPT, VIVA_PROMPT
-from rag.vector_store import PaperwiseChromaStore
+from backend.prompts.templates import VIVA_EVAL_PROMPT, VIVA_PROMPT
+from backend.rag.vector_store import PaperwiseChromaStore
 
 
 class VivaQuestionModel(BaseModel):
@@ -45,7 +45,9 @@ class VivaAgent:
         self.gen_chain = VIVA_PROMPT | llm | self.gen_parser
         self.eval_chain = VIVA_EVAL_PROMPT | llm | self.eval_parser
 
-    def generate_questions(self, title: str, page_count: int, pages: List[dict], min_questions: int = 20) -> dict:
+    def generate_questions(
+        self, title: str, page_count: int, pages: List[dict], min_questions: int = 20
+    ) -> dict:
         pages_text = "\n\n".join(f"[PAGE {p['pageNumber']}]\n{p['text']}" for p in pages)
         res = self.gen_chain.invoke({
             "min_questions": max(20, min_questions),
@@ -57,11 +59,19 @@ class VivaAgent:
         questions = [q.model_dump() for q in res.questions]
         return {"totalCount": len(questions), "questions": questions}
 
-    def evaluate_answer(self, document_id: str, question: dict, user_answer: str, top_k: int = 4) -> dict:
+    def evaluate_answer(
+        self,
+        document_id: str,
+        question: dict,
+        user_answer: str,
+        top_k: int = 4,
+        fallback_chunks: Optional[List[Dict[str, Any]]] = None,
+    ) -> dict:
         retrieval = self.store.query(
             document_id=document_id,
             query_text=f"{question['question']} {user_answer}",
             top_k=top_k,
+            fallback_chunks=fallback_chunks,
         )
         retrieved_ctx = "\n\n".join(
             f"[Page {c['page_number']} | Similarity {c['score']:.3f}]\n{c['text']}"

@@ -1,9 +1,14 @@
 import os
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+ROOT_DIR = str(Path(__file__).resolve().parent.parent)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -12,11 +17,11 @@ from fastapi.responses import Response
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
-from agents.concept_agent import ConceptExtractorAgent
-from agents.slide_agent import SlideGeneratorAgent
-from agents.summarizer_agent import SummarizerAgent
-from agents.viva_agent import VivaAgent
-from prompts.templates import (
+from backend.agents.concept_agent import ConceptExtractorAgent
+from backend.agents.slide_agent import SlideGeneratorAgent
+from backend.agents.summarizer_agent import SummarizerAgent
+from backend.agents.viva_agent import VivaAgent
+from backend.prompts.templates import (
     CONCEPT_PROMPT,
     INTENT_ROUTER_FEW_SHOT,
     INTENT_ROUTER_PROMPT,
@@ -27,12 +32,12 @@ from prompts.templates import (
     VIVA_EVAL_PROMPT,
     VIVA_PROMPT,
 )
-from rag.retriever import PaperwiseRetrieverService
-from rag.vector_store import PaperwiseChromaStore
-from services.docx_generator import build_summary_docx_bytes, build_viva_docx_bytes
-from services.intent_router import IntentRouterService
-from services.pdf_processor import chunk_pages, extract_pdf_pages
-from services.pptx_generator import build_pptx_bytes
+from backend.rag.retriever import PaperwiseRetrieverService
+from backend.rag.vector_store import PaperwiseChromaStore
+from backend.services.docx_generator import build_summary_docx_bytes, build_viva_docx_bytes
+from backend.services.intent_router import IntentRouterService
+from backend.services.pdf_processor import chunk_pages, extract_pdf_pages
+from backend.services.pptx_generator import build_pptx_bytes
 
 load_dotenv()
 

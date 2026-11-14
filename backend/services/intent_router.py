@@ -3,7 +3,7 @@ from typing import Literal
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
-from prompts.templates import INTENT_ROUTER_PROMPT
+from backend.prompts.templates import INTENT_ROUTER_PROMPT
 
 
 class IntentDecision(BaseModel):

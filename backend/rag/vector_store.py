@@ -1,28 +1,58 @@
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import chromadb
 from chromadb.config import Settings
-from rag.embeddings import PaperwiseEmbeddingProvider
+from backend.rag.embeddings import PaperwiseEmbeddingProvider
+from backend.utils.config import get_chroma_persist_dir
 
 
 class PaperwiseChromaStore:
-    """Manages document-isolated ChromaDB persistent collections."""
+    """Manages document-isolated ChromaDB collections with automatic rebuild support."""
 
     def __init__(self) -> None:
-        persist_dir = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
-        os.makedirs(persist_dir, exist_ok=True)
-        self.client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=Settings(anonymized_telemetry=False),
-        )
-        self.embedder = PaperwiseEmbeddingProvider()
+        persist_dir = get_chroma_persist_dir()
+        try:
+            os.makedirs(persist_dir, exist_ok=True)
+            self.client = chromadb.PersistentClient(
+                path=persist_dir,
+                settings=Settings(anonymized_telemetry=False),
+            )
+        except Exception:
+            self.client = chromadb.EphemeralClient(
+                settings=Settings(anonymized_telemetry=False)
+            )
+        self._embedder: Optional[PaperwiseEmbeddingProvider] = None
+
+    @property
+    def embedder(self) -> PaperwiseEmbeddingProvider:
+        if self._embedder is None:
+            self._embedder = PaperwiseEmbeddingProvider()
+        return self._embedder
 
     @staticmethod
     def collection_name_for(document_id: str) -> str:
         safe = "".join(c for c in document_id if c.isalnum() or c in ("_", "-"))
         return f"paperwise_collection_{safe}"
 
+    def has_collection(self, document_id: str) -> bool:
+        col_name = self.collection_name_for(document_id)
+        try:
+            col = self.client.get_collection(col_name)
+            return col.count() > 0
+        except Exception:
+            return False
+
+    def ensure_indexed(self, document_id: str, chunks: List[Dict[str, Any]]) -> str:
+        """Index chunks only if the document collection is missing or empty."""
+        col_name = self.collection_name_for(document_id)
+        if self.has_collection(document_id):
+            return col_name
+        return self.index_chunks(document_id, chunks)
+
     def index_chunks(self, document_id: str, chunks: List[Dict[str, Any]]) -> str:
+        if not chunks:
+            raise ValueError("Cannot index empty chunk list into ChromaDB.")
+
         col_name = self.collection_name_for(document_id)
         try:
             self.client.delete_collection(col_name)
@@ -48,8 +78,22 @@ class PaperwiseChromaStore:
         collection.add(ids=ids, documents=texts, embeddings=embeddings, metadatas=metadatas)
         return col_name
 
-    def query(self, document_id: str, query_text: str, top_k: int = 5) -> Dict[str, Any]:
+    def query(
+        self,
+        document_id: str,
+        query_text: str,
+        top_k: int = 5,
+        fallback_chunks: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         col_name = self.collection_name_for(document_id)
+        if not self.has_collection(document_id):
+            if fallback_chunks:
+                self.index_chunks(document_id, fallback_chunks)
+            else:
+                raise RuntimeError(
+                    f"Vector collection '{col_name}' is not indexed. Please re-process or reload the PDF."
+                )
+
         collection = self.client.get_collection(col_name)
         total_chunks = collection.count()
 
@@ -89,7 +133,6 @@ class PaperwiseChromaStore:
 
         for idx, text in enumerate(docs):
             meta = metas[idx]
-            # Chroma cosine distance = 1 - cosine_similarity
             similarity = max(0.0, min(1.0, 1.0 - float(dists[idx])))
             chunks.append({
                 "id": ids[idx],

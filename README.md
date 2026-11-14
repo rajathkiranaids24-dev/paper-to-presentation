@@ -4,28 +4,61 @@ An Agentic AI academic assistant that ingests PDF research papers, indexes page-
 
 ---
 
-## Architecture & Environment Note
+## Architecture & Deployment Modes
 
-This repository provides **both**:
+This repository supports **single-service Streamlit Community Cloud deployment** as well as the existing Node.js and FastAPI runtimes:
 
-1. **Live Full-Stack Preview Runtime (Node.js + Express + TypeScript LCEL + `@google/genai`)** — Configured in `server.ts` on Port `3000` so the entire application runs live inside environments without Python `pip` / `ensurepip` (such as the AI Studio sandbox, which runs Node 22 and Python 3.10 without `pip`). It implements real PDF page extraction (`pdfjs-dist`), real `gemini-embedding-2` vector indexing and cosine similarity search, real LCEL `PromptTemplate | Gemini | StructuredJsonParser` chains (`gemini-4-hydrogen`), real `.pptx` generation (`pptxgenjs`), and real `.docx` generation (`docx`).
-2. **Complete Python FastAPI + LangChain + PyMuPDF + ChromaDB + python-pptx Backend (`/backend`)** — Full local Python 3.11+ implementation matching the exact FastAPI / LangChain / PyMuPDF / ChromaDB / `python-pptx` specification.
+1. **Single-Service Streamlit Cloud App (`streamlit_app.py`) — Recommended for One Public URL**:
+   Runs the entire pipeline **in-process** inside the Streamlit Python runtime (`Streamlit UI → backend/services/paperwise_service.py → LangChain LCEL Agents → Google Gemini API + models/gemini-embedding-001 → ChromaDB RAG`) with **zero `localhost` HTTP requests** and **no separate FastAPI or Node.js server**.
+2. **Live Full-Stack Preview Runtime (`server.ts` on Port `3000`)**:
+   Node.js + Express + React + TypeScript runtime for environments without Python `pip`.
+3. **Local FastAPI + React Runtime (`/backend/main.py`)**:
+   Optional standalone FastAPI server for local API development.
+
+---
+
+## Deploying to Streamlit Community Cloud (One Public URL)
+
+1. Push this repository to GitHub (ensure `requirements.txt` and `streamlit_app.py` are at the repository root).
+2. Go to [share.streamlit.io](https://share.streamlit.io/) and click **New app**.
+3. Configure:
+   - **Repository**: `rajathkiranaids24-dev/paper-to-presentation`
+   - **Branch**: `main`
+   - **Main file path**: `streamlit_app.py`
+4. Open **Advanced settings → Secrets** and add:
+   ```toml
+   GEMINI_API_KEY = "your_google_gemini_api_key"
+   GEMINI_CHAT_MODEL = "gemini-2.5-flash"
+   GEMINI_EMBEDDING_MODEL = "models/gemini-embedding-001"
+   ```
+5. Click **Deploy**.
+
+### Run Streamlit Locally (Single Command)
+
+```bash
+pip install -r requirements.txt
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# Add your GEMINI_API_KEY inside .streamlit/secrets.toml
+streamlit run streamlit_app.py
+```
+
+Open `http://localhost:8501`.
 
 ---
 
 ## Seven Mandatory Agentic AI Acceptance Criteria
 
-1. **LLM Integration**: Server-side Google Gemini integration (`gemini-4-hydrogen` + `gemini-embedding-2`) with exponential backoff retries on 429/5xx and no client-side API key exposure.
+1. **LLM Integration**: Google Gemini integration (`gemini-2.5-flash` + `models/gemini-embedding-001` in Python, `st.secrets["GEMINI_API_KEY"]`) with no client-side API key exposure.
 2. **Interactive GUI**: 12-section academic SaaS dashboard (Dashboard, Upload Paper, AI Summary, Concept Extractor, Presentation Generator, Viva Preparation, Viva Practice, Research Paper Chat, Agent Activity Monitor, RAG Inspector, Prompt Engineering, Settings).
 3. **Prompt Engineering**: Dedicated Prompt Engineering page displaying live System Prompts, User `PromptTemplate`s, Zero-Shot & Few-Shot examples, and ReAct reflection rules.
-4. **LangChain Core Components**: Modular `PromptTemplate | LLM | OutputParser` LCEL pipelines across all four agents (`backend/agents/*.py` & `server/lcel.ts`).
+4. **LangChain Core Components**: Modular `PromptTemplate | LLM | OutputParser` LCEL pipelines across all four agents (`backend/agents/*.py`).
 5. **Agentic RAG**: Page-aware overlapping chunking, retrieval necessity checks, cosine similarity search, inline `[Page X]` citations, and explicit refusal when claims are unsupported by the uploaded PDF.
 6. **Intent Detection & Routing**: Few-Shot LCEL Intent Router classifying `SUMMARIZE_PAPER`, `EXTRACT_CONCEPTS`, `GENERATE_SLIDES`, `GENERATE_VIVA`, `ASK_PAPER_QUESTION`, and `EVALUATE_VIVA_ANSWER`, logged in the Agent Activity Monitor.
-7. **Vector Database**: Document-isolated vector collections (`paperwise_collection_<doc_id>`) using ChromaDB (Python backend) and persistent vector collections with real cosine similarity ranking (Node server), inspectable in the RAG Inspector.
+7. **Vector Database**: Document-isolated vector collections (`paperwise_collection_<doc_id>`) using ChromaDB with automatic container-restart re-indexing, inspectable in the RAG Inspector.
 
 ---
 
-## Running Locally (Option A: Full-Stack Node.js Runtime on Port 3000)
+## Running Locally (Alternative: Node.js Runtime on Port 3000)
 
 ```bash
 npm install
@@ -38,47 +71,16 @@ Open `http://localhost:3000`.
 
 ---
 
-## Running Locally (Option B: Python 3.11+ FastAPI + ChromaDB Backend + Vite Frontend)
+## Running Locally (Alternative: FastAPI + Vite Frontend)
 
 ```bash
-# 1. Start the Python FastAPI backend
 cd backend
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Add your GEMINI_API_KEY inside backend/.env
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# 2. In a second terminal, start the React frontend (proxy /api to port 8000)
-npm install
-npm run dev
 ```
-
----
-
-## Running Locally (Option C: Streamlit UI + FastAPI or Node Backend)
-
-`streamlit_app.py` provides the complete 12-page PAPERWISE AI interface in Streamlit and works with **either** the Python FastAPI backend (`http://localhost:8000`) or the Node.js Express backend (`http://localhost:3000`):
-
-```bash
-# 1. Install Python dependencies (includes streamlit, fastapi, langchain, chromadb, pymupdf, python-pptx)
-cd backend
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Add GEMINI_API_KEY inside backend/.env
-
-# 2. Start the FastAPI backend on port 8000
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# 3. In another terminal (with the same venv active), launch Streamlit
-cd ..
-streamlit run streamlit_app.py
-```
-
-Open `http://localhost:8501` (or switch the **Backend Endpoint** selector in the Streamlit sidebar between `http://localhost:8000` and `http://localhost:3000`).
 
 ---
 

@@ -1,18 +1,50 @@
-import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-import requests
 import streamlit as st
+from dotenv import load_dotenv
+
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+load_dotenv(ROOT_DIR / ".env")
+load_dotenv(ROOT_DIR / "backend" / ".env")
+
+from backend.rag.vector_store import PaperwiseChromaStore
+from backend.services.paperwise_service import (
+    DEFAULT_SETTINGS,
+    get_pptx_bytes,
+    get_prompt_specs,
+    get_summary_docx_bytes,
+    get_viva_docx_bytes,
+    ingest_pdf_bytes,
+    inspect_rag,
+    load_sample_paper,
+    route_natural_language_task,
+    run_concept_extractor,
+    run_rag_chat,
+    run_slide_generator,
+    run_summarizer,
+    run_viva_evaluation,
+    run_viva_generator,
+)
+from backend.utils.config import (
+    get_chat_model_name,
+    get_embedding_model_name,
+    has_gemini_api_key,
+)
 
 st.set_page_config(
-    page_title="PAPERWISE AI — Research Paper to Presentation & Viva System",
+    page_title="PAPERWISE — AI Research Command Center",
     page_icon="📘",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Subtle dark-navy sidebar & crisp academic workspace polish
+# Academic Navy Sidebar & Crisp Command-Center Styling
 st.markdown(
     """
     <style>
@@ -27,13 +59,6 @@ st.markdown(
       [data-testid="stSidebar"] p,
       [data-testid="stSidebar"] span {
         color: #E2E8F0;
-      }
-      .paperwise-card {
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-        background-color: #FFFFFF;
-        margin-bottom: 0.75rem;
       }
       .paperwise-slide {
         border: 1px solid #CBD5E1;
@@ -50,9 +75,17 @@ st.markdown(
         margin-bottom: 1rem;
       }
       .paperwise-meta {
-        font-size: 0.82rem;
-        color: #64748B;
+        font-size: 0.85rem;
+        color: #475569;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-bottom: 0.75rem;
+      }
+      .paperwise-gap-box {
+        border-left: 4px solid #F59E0B;
+        background-color: #FFFBEB;
+        padding: 0.9rem 1.1rem;
+        border-radius: 6px;
+        margin-bottom: 0.75rem;
       }
     </style>
     """,
@@ -74,75 +107,94 @@ PAGES = [
     "Settings",
 ]
 
-DEFAULT_API_BASE = os.getenv("PAPERWISE_API_URL", "http://localhost:8000")
 
-if "api_base" not in st.session_state:
-    st.session_state.api_base = DEFAULT_API_BASE
+@st.cache_resource(show_spinner=False)
+def get_vector_store() -> PaperwiseChromaStore:
+    return PaperwiseChromaStore()
+
+
+if "workspaces" not in st.session_state:
+    st.session_state.workspaces = {}
 if "active_paper_id" not in st.session_state:
     st.session_state.active_paper_id = None
 if "nav_page" not in st.session_state:
     st.session_state.nav_page = "Dashboard"
 if "viva_practice_idx" not in st.session_state:
     st.session_state.viva_practice_idx = 0
+if "settings" not in st.session_state:
+    st.session_state.settings = dict(DEFAULT_SETTINGS)
+if "last_route_notice" not in st.session_state:
+    st.session_state.last_route_notice = None
 
 
-def api_url(path: str) -> str:
-    base = st.session_state.api_base.rstrip("/")
-    return f"{base}{path}"
+def get_papers_list() -> List[Dict[str, Any]]:
+    workspaces: Dict[str, Dict[str, Any]] = st.session_state.workspaces
+    return sorted(
+        (ws["metadata"] for ws in workspaces.values()),
+        key=lambda m: m.get("uploadedAt", ""),
+        reverse=True,
+    )
 
 
-def api_request(
-    method: str,
-    path: str,
-    timeout: int = 120,
-    **kwargs: Any,
-) -> Any:
-    try:
-        resp = requests.request(method, api_url(path), timeout=timeout, **kwargs)
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            f"Unable to reach Paperwise backend at {st.session_state.api_base}. "
-            f"Start FastAPI (`uvicorn main:app --port 8000`) or Node server (`npm run dev` on port 3000). Details: {exc}"
-        ) from exc
-
-    if not resp.ok:
-        detail = f"HTTP {resp.status_code}"
-        try:
-            body = resp.json()
-            detail = body.get("error") or body.get("detail") or detail
-        except Exception:
-            pass
-        raise RuntimeError(detail)
-
-    content_type = resp.headers.get("content-type", "")
-    if "application/json" in content_type:
-        return resp.json()
-    return resp.content
-
-
-def fetch_papers_list() -> List[Dict[str, Any]]:
-    try:
-        data = api_request("GET", "/api/papers", timeout=10)
-        return data.get("papers", [])
-    except Exception:
-        return []
-
-
-def fetch_active_workspace() -> Optional[Dict[str, Any]]:
-    papers = fetch_papers_list()
+def get_active_workspace() -> Optional[Dict[str, Any]]:
+    papers = get_papers_list()
     if not papers:
         st.session_state.active_paper_id = None
         return None
-
     target_id = st.session_state.active_paper_id
-    if not target_id or not any(p["id"] == target_id for p in papers):
+    if not target_id or target_id not in st.session_state.workspaces:
         target_id = papers[0]["id"]
         st.session_state.active_paper_id = target_id
+    return st.session_state.workspaces.get(target_id)
 
+
+def clear_single_workspace(doc_id: str) -> None:
+    st.session_state.workspaces.pop(doc_id, None)
     try:
-        return api_request("GET", f"/api/papers/{target_id}", timeout=15)
+        get_vector_store().delete_document(doc_id)
     except Exception:
-        return None
+        pass
+    if st.session_state.active_paper_id == doc_id:
+        remaining = get_papers_list()
+        st.session_state.active_paper_id = remaining[0]["id"] if remaining else None
+    st.session_state.viva_practice_idx = 0
+
+
+def reset_entire_workspace() -> None:
+    store = get_vector_store()
+    for doc_id in list(st.session_state.workspaces.keys()):
+        try:
+            store.delete_document(doc_id)
+        except Exception:
+            pass
+    st.session_state.workspaces = {}
+    st.session_state.active_paper_id = None
+    st.session_state.viva_practice_idx = 0
+    st.session_state.last_route_notice = None
+
+
+def handle_load_sample() -> None:
+    store = get_vector_store()
+    cfg = st.session_state.settings
+    ws = load_sample_paper(
+        store=store,
+        chunk_size=int(cfg["chunkSize"]),
+        chunk_overlap=int(cfg["chunkOverlap"]),
+        existing_workspaces=st.session_state.workspaces,
+    )
+    doc_id = ws["metadata"]["id"]
+    st.session_state.workspaces[doc_id] = ws
+    st.session_state.active_paper_id = doc_id
+
+
+def render_api_key_guard() -> bool:
+    if has_gemini_api_key():
+        return True
+    st.error(
+        "**GEMINI_API_KEY is not configured.** Add `GEMINI_API_KEY` in Streamlit Cloud "
+        "(`Settings → Secrets → GEMINI_API_KEY = \"your_key\"`) or in `.streamlit/secrets.toml` locally."
+    )
+    return False
 
 
 def render_empty_paper_cta() -> None:
@@ -155,11 +207,16 @@ def render_empty_paper_cta() -> None:
             st.session_state.nav_page = "Upload Research Paper"
             st.rerun()
     with col2:
-        if st.button("Load Sample Paper (ARAG-Lite 6-Page PDF)", type="primary", use_container_width=True):
-            with st.spinner("Extracting PDF pages, chunking, and indexing vector embeddings..."):
+        if st.button(
+            "Load Sample Paper (ARAG-Lite 6-Page PDF)",
+            type="primary",
+            use_container_width=True,
+        ):
+            if not render_api_key_guard():
+                return
+            with st.spinner("Extracting PDF pages, chunking, and indexing Gemini embeddings into ChromaDB..."):
                 try:
-                    ws = api_request("POST", "/api/papers/load-sample", timeout=120)
-                    st.session_state.active_paper_id = ws["metadata"]["id"]
+                    handle_load_sample()
                     st.success("Sample paper indexed successfully.")
                     st.rerun()
                 except Exception as exc:
@@ -168,8 +225,11 @@ def render_empty_paper_cta() -> None:
 
 # --- Sidebar ---
 with st.sidebar:
-    st.markdown("## PAPERWISE AI")
-    st.caption("Research Paper to Presentation & Viva System")
+    logo_path = ROOT_DIR / "assets" / "paperwise_logo.svg"
+    if logo_path.exists():
+        st.image(str(logo_path), width=42)
+    st.markdown("## PAPERWISE")
+    st.caption("AI Research Command Center")
 
     selected_page = st.radio(
         "Navigation",
@@ -181,13 +241,11 @@ with st.sidebar:
         st.session_state.nav_page = selected_page
 
     st.divider()
-    papers_list = fetch_papers_list()
+    papers_list = get_papers_list()
     if papers_list:
-        titles = {p["id"]: f"{p['title'][:42]} ({p['pageCount']}p)" for p in papers_list}
-        current_idx = 0
+        titles = {p["id"]: f"{p['title'][:40]} ({p['pageCount']}p)" for p in papers_list}
         ids = [p["id"] for p in papers_list]
-        if st.session_state.active_paper_id in ids:
-            current_idx = ids.index(st.session_state.active_paper_id)
+        current_idx = ids.index(st.session_state.active_paper_id) if st.session_state.active_paper_id in ids else 0
         chosen_id = st.selectbox(
             "Active Manuscript",
             options=ids,
@@ -195,35 +253,40 @@ with st.sidebar:
             format_func=lambda pid: titles.get(pid, pid),
         )
         st.session_state.active_paper_id = chosen_id
+
+        if st.button("Clear Workspace", use_container_width=True):
+            reset_entire_workspace()
+            st.rerun()
     else:
-        st.caption("No PDF uploaded yet")
+        st.caption("No PDF loaded yet")
 
     st.divider()
-    backend_choice = st.selectbox(
-        "Backend Endpoint",
-        options=["http://localhost:8000", "http://localhost:3000", "Custom"],
-        index=0 if st.session_state.api_base == "http://localhost:8000" else (1 if st.session_state.api_base == "http://localhost:3000" else 2),
+    api_ready = has_gemini_api_key()
+    st.caption(
+        f"Runtime: In-Process Python + ChromaDB  \n"
+        f"Chat: `{get_chat_model_name()}`  \n"
+        f"Embeddings: `{get_embedding_model_name()}`  \n"
+        f"Gemini Secret: {'Configured' if api_ready else 'Missing'}"
     )
-    if backend_choice != "Custom":
-        st.session_state.api_base = backend_choice
-    else:
-        st.session_state.api_base = st.text_input("Custom API URL", value=st.session_state.api_base)
-
-    try:
-        health = api_request("GET", "/api/health", timeout=4)
-        st.caption(f"Connected · {health.get('chatModel', 'Gemini')}")
-    except Exception:
-        st.caption("Backend offline — start FastAPI (:8000) or Express (:3000)")
 
 
-workspace = fetch_active_workspace()
+workspace = get_active_workspace()
 page = st.session_state.nav_page
+store = get_vector_store()
+settings = st.session_state.settings
 
 # ==============================================================================
 # 1. DASHBOARD
 # ==============================================================================
 if page == "Dashboard":
-    st.title("Academic Research Command Center")
+    st.title("PAPERWISE — AI RESEARCH COMMAND CENTER")
+    st.caption("Single-service Streamlit runtime · PyMuPDF · LangChain LCEL · Google Gemini · ChromaDB RAG")
+    render_api_key_guard()
+
+    if st.session_state.last_route_notice:
+        st.success(st.session_state.last_route_notice)
+        st.session_state.last_route_notice = None
+
     if not workspace:
         render_empty_paper_cta()
     else:
@@ -242,7 +305,7 @@ if page == "Dashboard":
 
         st.markdown("### Intent Router Dispatch")
         with st.form("intent_dispatch_form", clear_on_submit=True):
-            c1, c2 = st.columns([5, 1])
+            c1, c2 = st.columns([5, 1.4])
             with c1:
                 task_prompt = st.text_input(
                     "Ask or request any task in plain language",
@@ -252,30 +315,27 @@ if page == "Dashboard":
             with c2:
                 submitted = st.form_submit_button("Detect Intent & Run", type="primary", use_container_width=True)
             if submitted and task_prompt.strip():
-                with st.spinner("Classifying intent via Few-Shot LCEL router and executing selected agent..."):
-                    try:
-                        res = api_request(
-                            "POST",
-                            f"/api/papers/{meta['id']}/route",
-                            json={"prompt": task_prompt.strip()},
-                        )
-                        clf = res.get("classification", {})
-                        st.success(
-                            f"Detected Intent: `{clf.get('intent')}` → Routed to **{clf.get('selectedAgent')}**"
-                        )
-                        tab_map = {
-                            "summary": "AI Summary",
-                            "concepts": "Concept Extractor",
-                            "slides": "Presentation Generator",
-                            "viva": "Viva Preparation",
-                            "practice": "Viva Practice",
-                            "chat": "Research Paper Chat",
-                        }
-                        if res.get("targetTab") in tab_map:
-                            st.session_state.nav_page = tab_map[res["targetTab"]]
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                if render_api_key_guard():
+                    with st.spinner("Classifying intent via Few-Shot LCEL router and executing selected agent..."):
+                        try:
+                            res = route_natural_language_task(workspace, store, task_prompt, settings)
+                            clf = res.get("classification", {})
+                            st.session_state.last_route_notice = (
+                                f"Detected Intent: `{clf.get('intent')}` → Routed to **{clf.get('selectedAgent')}**"
+                            )
+                            tab_map = {
+                                "summary": "AI Summary",
+                                "concepts": "Concept Extractor",
+                                "slides": "Presentation Generator",
+                                "viva": "Viva Preparation",
+                                "practice": "Viva Practice",
+                                "chat": "Research Paper Chat",
+                            }
+                            if res.get("targetTab") in tab_map:
+                                st.session_state.nav_page = tab_map[res["targetTab"]]
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
 
         st.markdown("### Specialized AI Agents")
         a1, a2, a3, a4 = st.columns(4)
@@ -283,16 +343,24 @@ if page == "Dashboard":
             st.markdown("**Summarizer Agent**")
             st.caption("Completed" if workspace.get("summary") else "Pending")
             if st.button("Run Summarizer", key="dash_sum", use_container_width=True):
-                with st.spinner("Running Summarizer Agent..."):
-                    api_request("POST", f"/api/papers/{meta['id']}/summarize")
-                    st.rerun()
+                if render_api_key_guard():
+                    with st.spinner("Running Summarizer Agent..."):
+                        try:
+                            run_summarizer(workspace, model_name=settings.get("activeModel"))
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
         with a2:
-            st.markdown("**Concept-Extractor Agent**")
+            st.markdown("**Concept & Gap Extractor**")
             st.caption("Completed" if workspace.get("concepts") else "Pending")
             if st.button("Run Extractor", key="dash_con", use_container_width=True):
-                with st.spinner("Running Concept-Extractor Agent..."):
-                    api_request("POST", f"/api/papers/{meta['id']}/concepts")
-                    st.rerun()
+                if render_api_key_guard():
+                    with st.spinner("Running Concept, Methodology & Research Gap Agent..."):
+                        try:
+                            run_concept_extractor(workspace, model_name=settings.get("activeModel"))
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
         with a3:
             st.markdown("**Slide-Generator Agent**")
             st.caption(
@@ -301,13 +369,18 @@ if page == "Dashboard":
                 else "Pending"
             )
             if st.button("Generate Slides", key="dash_sli", use_container_width=True):
-                with st.spinner("Running Slide-Generator Agent..."):
-                    api_request(
-                        "POST",
-                        f"/api/papers/{meta['id']}/slides",
-                        json={"slideCount": 10, "theme": "oxford-navy"},
-                    )
-                    st.rerun()
+                if render_api_key_guard():
+                    with st.spinner("Running Slide-Generator Agent..."):
+                        try:
+                            run_slide_generator(
+                                workspace,
+                                slide_count=int(settings.get("defaultSlideCount", 10)),
+                                theme=str(settings.get("defaultSlideTheme", "oxford-navy")),
+                                model_name=settings.get("activeModel"),
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
         with a4:
             st.markdown("**Viva Agent**")
             st.caption(
@@ -316,9 +389,13 @@ if page == "Dashboard":
                 else "Pending"
             )
             if st.button("Generate Viva", key="dash_viv", use_container_width=True):
-                with st.spinner("Running Viva Agent..."):
-                    api_request("POST", f"/api/papers/{meta['id']}/viva", json={"minQuestions": 20})
-                    st.rerun()
+                if render_api_key_guard():
+                    with st.spinner("Generating 20+ Viva questions..."):
+                        try:
+                            run_viva_generator(workspace, store, min_questions=20, model_name=settings.get("activeModel"))
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
 
         col_left, col_right = st.columns([5, 7])
         with col_left:
@@ -351,35 +428,48 @@ if page == "Dashboard":
 elif page == "Upload Research Paper":
     st.title("Upload Research Paper")
     st.caption("Upload a text-selectable PDF research paper (max 25 MB) or load the built-in 6-page sample paper.")
+    render_api_key_guard()
 
     u1, u2 = st.columns([3, 2])
     with u1:
         uploaded = st.file_uploader("Choose a PDF file", type=["pdf"])
         if uploaded is not None:
             if st.button("Process & Index Uploaded PDF", type="primary"):
-                with st.spinner("Extracting PDF pages and indexing vector embeddings..."):
+                if render_api_key_guard():
+                    with st.spinner("Extracting PDF pages and indexing Gemini embeddings into ChromaDB..."):
+                        try:
+                            ws = ingest_pdf_bytes(
+                                pdf_bytes=uploaded.getvalue(),
+                                filename=uploaded.name,
+                                store=store,
+                                chunk_size=int(settings["chunkSize"]),
+                                chunk_overlap=int(settings["chunkOverlap"]),
+                                is_sample=False,
+                                existing_workspaces=st.session_state.workspaces,
+                            )
+                            doc_id = ws["metadata"]["id"]
+                            st.session_state.workspaces[doc_id] = ws
+                            st.session_state.active_paper_id = doc_id
+                            st.success(
+                                f"Indexed {ws['metadata']['chunkCount']} chunks across {ws['metadata']['pageCount']} pages."
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+    with u2:
+        st.markdown("**Quick Demo Paper**")
+        st.caption("Loads the built-in 6-page ARAG-Lite PDF (`sample_papers/adaptive_rag_academic_survey.pdf`).")
+        if st.button("Load Sample Paper (ARAG-Lite 6-Page PDF)", use_container_width=True):
+            if render_api_key_guard():
+                with st.spinner("Ingesting sample PDF and indexing embeddings..."):
                     try:
-                        files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
-                        ws = api_request("POST", "/api/papers/upload", files=files, timeout=180)
-                        st.session_state.active_paper_id = ws["metadata"]["id"]
-                        st.success(f"Indexed {ws['metadata']['chunkCount']} chunks across {ws['metadata']['pageCount']} pages.")
+                        handle_load_sample()
+                        st.success("Sample paper indexed successfully.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
-    with u2:
-        st.markdown("**Quick Demo Paper**")
-        st.caption("Uses the real 6-page ARAG-Lite PDF in `sample_papers/adaptive_rag_academic_survey.pdf`.")
-        if st.button("Load Sample Paper (ARAG-Lite 6-Page PDF)", use_container_width=True):
-            with st.spinner("Ingesting sample PDF..."):
-                try:
-                    ws = api_request("POST", "/api/papers/load-sample", timeout=120)
-                    st.session_state.active_paper_id = ws["metadata"]["id"]
-                    st.success("Sample paper indexed successfully.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
 
-    papers = fetch_papers_list()
+    papers = get_papers_list()
     if papers:
         st.markdown(f"### Indexed Document Collections ({len(papers)})")
         for p in papers:
@@ -389,10 +479,8 @@ elif page == "Upload Research Paper":
             if c3.button("Select", key=f"sel_{p['id']}"):
                 st.session_state.active_paper_id = p["id"]
                 st.rerun()
-            if c4.button("Delete", key=f"del_{p['id']}"):
-                api_request("DELETE", f"/api/papers/{p['id']}")
-                if st.session_state.active_paper_id == p["id"]:
-                    st.session_state.active_paper_id = None
+            if c4.button("Remove", key=f"del_{p['id']}"):
+                clear_single_workspace(p["id"])
                 st.rerun()
 
     if workspace and workspace.get("pages"):
@@ -405,10 +493,10 @@ elif page == "Upload Research Paper":
             st.text_area("Extracted Text", value=page_obj["text"], height=240, disabled=True)
 
 # ==============================================================================
-# 3. AI SUMMARY
+# 3. AI SUMMARY (includes Methodology Analysis)
 # ==============================================================================
 elif page == "AI Summary":
-    st.title("AI Structured Summary")
+    st.title("AI Structured Summary & Methodology Analysis")
     if not workspace:
         render_empty_paper_cta()
     else:
@@ -419,17 +507,18 @@ elif page == "AI Summary":
                 "Regenerate Summary" if workspace.get("summary") else "Generate Structured Summary",
                 type="primary",
             ):
-                with st.spinner("Running Summarizer Agent via LCEL..."):
-                    try:
-                        api_request("POST", f"/api/papers/{meta['id']}/summarize")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                if render_api_key_guard():
+                    with st.spinner("Running Summarizer Agent via LCEL..."):
+                        try:
+                            run_summarizer(workspace, model_name=settings.get("activeModel"))
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
         summary = workspace.get("summary")
         if summary:
             with b2:
                 try:
-                    docx_bytes = api_request("GET", f"/api/papers/{meta['id']}/download/summary-docx")
+                    docx_bytes = get_summary_docx_bytes(workspace)
                     st.download_button(
                         "Download .docx",
                         data=docx_bytes,
@@ -437,8 +526,8 @@ elif page == "AI Summary":
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    st.error(str(exc))
             with b3:
                 md_text = (
                     f"# {summary['title']}\n**Authors:** {summary['authors']}\n\n"
@@ -472,8 +561,8 @@ elif page == "AI Summary":
                 for idx, obj in enumerate(summary.get("objectives", []), 1):
                     st.markdown(f"{idx}. {obj}")
 
-            st.markdown("#### Methodology")
-            st.write(summary["methodology"])
+            st.markdown("#### Research Methodology Analysis")
+            st.info(summary["methodology"])
 
             col_c, col_d = st.columns(2)
             with col_c:
@@ -493,25 +582,30 @@ elif page == "AI Summary":
                 for item in summary.get("simpleExplanations", []):
                     st.markdown(f"**{item['term']}:** {item['explanation']}")
 
+            if workspace.get("concepts") and workspace["concepts"].get("limitations"):
+                st.markdown("#### Identified Research Gaps & Limitations")
+                for lim in workspace["concepts"]["limitations"]:
+                    st.markdown(f"- {lim}")
+
 # ==============================================================================
-# 4. CONCEPT EXTRACTOR
+# 4. CONCEPT EXTRACTOR (Concepts, Methodology & Research Gap Identification)
 # ==============================================================================
 elif page == "Concept Extractor":
-    st.title("Concept & Terminology Extractor")
+    st.title("Concept, Methodology & Research Gap Extractor")
     if not workspace:
         render_empty_paper_cta()
     else:
-        meta = workspace["metadata"]
         if st.button(
-            "Re-Extract Concepts" if workspace.get("concepts") else "Extract Concepts & Glossary",
+            "Re-Extract Concepts & Research Gaps" if workspace.get("concepts") else "Extract Concepts, Methodology & Gaps",
             type="primary",
         ):
-            with st.spinner("Running Concept-Extractor Agent..."):
-                try:
-                    api_request("POST", f"/api/papers/{meta['id']}/concepts")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+            if render_api_key_guard():
+                with st.spinner("Running Concept-Extractor Agent..."):
+                    try:
+                        run_concept_extractor(workspace, model_name=settings.get("activeModel"))
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
 
         concepts = workspace.get("concepts")
         if concepts:
@@ -521,7 +615,7 @@ elif page == "Concept Extractor":
                     st.write(c["definition"])
                     st.caption(f"In simple terms: {c['simpleExplanation']}")
 
-            st.markdown(f"### Algorithms & Methodologies ({len(concepts.get('algorithmsAndMethods', []))})")
+            st.markdown(f"### Research Methodology & Algorithms ({len(concepts.get('algorithmsAndMethods', []))})")
             for alg in concepts.get("algorithmsAndMethods", []):
                 st.markdown(f"**{alg['name']}** (`{alg['pageReference']}`)")
                 st.markdown(f"- **Purpose:** {alg['purpose']}")
@@ -532,14 +626,18 @@ elif page == "Concept Extractor":
                 st.markdown("### Research Contributions")
                 for r in concepts.get("researchContributions", []):
                     st.markdown(f"- {r}")
-                st.markdown("### Stated Limitations")
-                for lim in concepts.get("limitations", []):
-                    st.markdown(f"- {lim}")
+                st.markdown("### Research Gaps & Stated Limitations")
+                limitations = concepts.get("limitations", [])
+                if limitations:
+                    items_html = "".join(f"<li>{lim}</li>" for lim in limitations)
+                    st.markdown(f"<div class='paperwise-gap-box'><ul>{items_html}</ul></div>", unsafe_allow_html=True)
+                else:
+                    st.caption("No explicit limitations were identified in the extracted text.")
             with c2:
                 st.markdown("### Important Findings")
                 for f_item in concepts.get("importantFindings", []):
                     st.markdown(f"- {f_item}")
-                st.markdown("### Future Scope")
+                st.markdown("### Future Scope & Open Directions")
                 for fs_item in concepts.get("futureScope", []):
                     st.markdown(f"- {fs_item}")
 
@@ -557,7 +655,7 @@ elif page == "Concept Extractor":
 # 5. PRESENTATION GENERATOR
 # ==============================================================================
 elif page == "Presentation Generator":
-    st.title("Presentation Generator")
+    st.title("Presentation Generator & PPTX Export")
     if not workspace:
         render_empty_paper_cta()
     else:
@@ -570,22 +668,24 @@ elif page == "Presentation Generator":
         with c3:
             st.write("")
             if st.button("Generate Presentation", type="primary", use_container_width=True):
-                with st.spinner(f"Generating {slide_count} slides via Slide-Generator Agent..."):
-                    try:
-                        api_request(
-                            "POST",
-                            f"/api/papers/{meta['id']}/slides",
-                            json={"slideCount": slide_count, "theme": theme},
-                        )
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                if render_api_key_guard():
+                    with st.spinner(f"Generating {slide_count} slides via Slide-Generator Agent..."):
+                        try:
+                            run_slide_generator(
+                                workspace,
+                                slide_count=slide_count,
+                                theme=theme,
+                                model_name=settings.get("activeModel"),
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
         deck = workspace.get("presentation")
         if deck:
             with c4:
                 st.write("")
                 try:
-                    pptx_bytes = api_request("GET", f"/api/papers/{meta['id']}/download/pptx")
+                    pptx_bytes = get_pptx_bytes(workspace)
                     st.download_button(
                         "Download .pptx",
                         data=pptx_bytes,
@@ -597,34 +697,35 @@ elif page == "Presentation Generator":
                     st.error(str(exc))
 
             slides = deck.get("slides", [])
-            slide_labels = [f"Slide {s['slideNumber']}: {s['title']}" for s in slides]
-            chosen_idx = st.selectbox(
-                "Select Slide to Preview",
-                range(len(slides)),
-                format_func=lambda idx: slide_labels[idx],
-            )
-            slide = slides[chosen_idx]
-            box_class = "paperwise-slide-title" if slide["slideNumber"] == 1 else "paperwise-slide"
-            bullets_html = "".join(f"<li>{b}</li>" for b in slide.get("bullets", []))
-            st.markdown(
-                f"""
-                <div class="{box_class}">
-                  <div style="font-size:12px; opacity:0.8; margin-bottom:6px;">
-                    {slide.get('sectionType', '')} · {slide.get('pageReferences', '')} · Slide {slide['slideNumber']} / {deck['slideCount']}
-                  </div>
-                  <h2 style="margin-top:0;">{slide['title']}</h2>
-                  <ul style="line-height:1.65;">{bullets_html}</ul>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if slide.get("chartData") and len(slide["chartData"]) >= 2:
-                st.markdown("**Quantitative Chart Extracted from Paper**")
-                cdf = pd.DataFrame(slide["chartData"])
-                st.bar_chart(cdf.set_index("label")["value"])
-            if slide.get("diagramNodes"):
-                st.markdown("**Architecture / Workflow Flow:** " + " → ".join(slide["diagramNodes"]))
-            st.info(f"**Speaker Notes:** {slide.get('speakerNotes', '')}")
+            if slides:
+                slide_labels = [f"Slide {s['slideNumber']}: {s['title']}" for s in slides]
+                chosen_idx = st.selectbox(
+                    "Select Slide to Preview",
+                    range(len(slides)),
+                    format_func=lambda idx: slide_labels[idx],
+                )
+                slide = slides[chosen_idx]
+                box_class = "paperwise-slide-title" if slide["slideNumber"] == 1 else "paperwise-slide"
+                bullets_html = "".join(f"<li>{b}</li>" for b in slide.get("bullets", []))
+                st.markdown(
+                    f"""
+                    <div class="{box_class}">
+                      <div style="font-size:12px; opacity:0.8; margin-bottom:6px;">
+                        {slide.get('sectionType', '')} · {slide.get('pageReferences', '')} · Slide {slide['slideNumber']} / {deck['slideCount']}
+                      </div>
+                      <h2 style="margin-top:0;">{slide['title']}</h2>
+                      <ul style="line-height:1.65;">{bullets_html}</ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if slide.get("chartData") and len(slide["chartData"]) >= 2:
+                    st.markdown("**Quantitative Chart Extracted from Paper**")
+                    cdf = pd.DataFrame(slide["chartData"])
+                    st.bar_chart(cdf.set_index("label")["value"])
+                if slide.get("diagramNodes"):
+                    st.markdown("**Architecture / Workflow Flow:** " + " → ".join(slide["diagramNodes"]))
+                st.info(f"**Speaker Notes:** {slide.get('speakerNotes', '')}")
 
 # ==============================================================================
 # 6. VIVA PREPARATION
@@ -641,17 +742,23 @@ elif page == "Viva Preparation":
                 "Regenerate Question Bank" if workspace.get("viva") else "Generate 20+ Viva Questions",
                 type="primary",
             ):
-                with st.spinner("Generating 20+ categorized viva questions..."):
-                    try:
-                        api_request("POST", f"/api/papers/{meta['id']}/viva", json={"minQuestions": 20})
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                if render_api_key_guard():
+                    with st.spinner("Generating 20+ categorized viva questions..."):
+                        try:
+                            run_viva_generator(
+                                workspace,
+                                store,
+                                min_questions=20,
+                                model_name=settings.get("activeModel"),
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
         viva = workspace.get("viva")
         if viva:
             with c2:
                 try:
-                    viva_docx = api_request("GET", f"/api/papers/{meta['id']}/download/viva-docx")
+                    viva_docx = get_viva_docx_bytes(workspace)
                     st.download_button(
                         "Download Viva .docx",
                         data=viva_docx,
@@ -659,8 +766,8 @@ elif page == "Viva Preparation":
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    st.error(str(exc))
 
             f1, f2, f3, f4 = st.columns([2, 2, 1.5, 1])
             with f1:
@@ -695,15 +802,24 @@ elif page == "Viva Preparation":
 # 7. VIVA PRACTICE
 # ==============================================================================
 elif page == "Viva Practice":
-    st.title("Interactive Viva Practice Simulator")
+    st.title("Interactive Viva Practice & Answer Evaluation")
     if not workspace:
         render_empty_paper_cta()
     elif not workspace.get("viva"):
         st.warning("Generate the Viva Question Bank first before starting practice mode.")
         if st.button("Generate 20+ Viva Questions", type="primary"):
-            with st.spinner("Generating questions..."):
-                api_request("POST", f"/api/papers/{workspace['metadata']['id']}/viva", json={"minQuestions": 20})
-                st.rerun()
+            if render_api_key_guard():
+                with st.spinner("Generating questions..."):
+                    try:
+                        run_viva_generator(
+                            workspace,
+                            store,
+                            min_questions=20,
+                            model_name=settings.get("activeModel"),
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
     else:
         questions = workspace["viva"]["questions"]
         evals = workspace.get("evaluations", [])
@@ -736,16 +852,20 @@ elif page == "Viva Practice":
             user_ans = st.text_area("Your Viva Defense Answer", height=150)
             submit_ans = st.form_submit_button("Submit Answer for AI Evaluation", type="primary")
             if submit_ans and user_ans.strip():
-                with st.spinner("Retrieving ground-truth passages and grading via Gemini..."):
-                    try:
-                        api_request(
-                            "POST",
-                            f"/api/papers/{workspace['metadata']['id']}/viva/evaluate",
-                            json={"questionId": q["id"], "userAnswer": user_ans.strip()},
-                        )
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                if render_api_key_guard():
+                    with st.spinner("Retrieving ground-truth passages from ChromaDB and grading via Gemini..."):
+                        try:
+                            run_viva_evaluation(
+                                workspace,
+                                store,
+                                question_id=q["id"],
+                                user_answer=user_ans.strip(),
+                                top_k=int(settings.get("topK", 5)),
+                                model_name=settings.get("activeModel"),
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
 
         latest = next((e for e in workspace.get("evaluations", []) if e["questionId"] == q["id"]), None)
         if latest:
@@ -770,7 +890,9 @@ elif page == "Research Paper Chat":
         render_empty_paper_cta()
     else:
         meta = workspace["metadata"]
-        st.caption(f"Vector Collection: `{meta['collectionName']}` · Strict page citation & unsupported-claim refusal enabled")
+        st.caption(
+            f"Vector Collection: `{meta['collectionName']}` · Strict page citation & unsupported-claim refusal enabled"
+        )
 
         for msg in workspace.get("chatHistory", []):
             with st.chat_message(msg["role"]):
@@ -787,18 +909,25 @@ elif page == "Research Paper Chat":
                         with st.expander("Inspect Retrieved Vector Chunks"):
                             for ch in chunks:
                                 st.markdown(
-                                    f"**Page {ch['pageNumber']} · Chunk #{ch['chunkIndex']} · Similarity: `{ch['score']:.4f}`**"
+                                    f"**Page {ch['page_number']} · Chunk #{ch['chunk_index']} · Similarity: `{ch['score']:.4f}`**"
                                 )
                                 st.write(ch["text"])
 
         prompt = st.chat_input("Ask a question grounded in this research paper...")
         if prompt:
-            with st.spinner("Running Intent Router → Vector Similarity Search → ReAct Grounding..."):
-                try:
-                    api_request("POST", f"/api/papers/{meta['id']}/chat", json={"message": prompt})
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+            if render_api_key_guard():
+                with st.spinner("Running Intent Router → ChromaDB Similarity Search → ReAct Grounding..."):
+                    try:
+                        run_rag_chat(
+                            workspace,
+                            store,
+                            user_message=prompt,
+                            top_k=int(settings.get("topK", 5)),
+                            model_name=settings.get("activeModel"),
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
 
 # ==============================================================================
 # 9. AGENT ACTIVITY MONITOR
@@ -837,7 +966,6 @@ elif page == "RAG Inspector":
     if not workspace:
         render_empty_paper_cta()
     else:
-        meta = workspace["metadata"]
         c1, c2, c3 = st.columns([5, 1.5, 1.5])
         with c1:
             rag_query = st.text_input(
@@ -850,90 +978,103 @@ elif page == "RAG Inspector":
             st.write("")
             run_search = st.button("Run Vector Search", type="primary", use_container_width=True)
 
-        try:
-            inspection = api_request(
-                "GET",
-                f"/api/papers/{meta['id']}/rag-inspect",
-                params={"query": rag_query if (run_search or rag_query) else "", "topK": top_k},
-            )
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Collection", inspection["collectionName"][-16:])
-            m2.metric("Indexed Chunks", inspection["totalChunks"])
-            m3.metric("Embedding Model", inspection["embeddingModel"])
-            m4.metric("Status", inspection["retrievalStatus"])
-
-            chunks = inspection.get("retrievedChunks", [])
-            if rag_query and chunks:
-                cdf = pd.DataFrame(
-                    [{"Chunk": f"C#{c['chunkIndex']} (P.{c['pageNumber']})", "Similarity": c["score"]} for c in chunks]
+        if not rag_query or render_api_key_guard():
+            try:
+                inspection = inspect_rag(
+                    workspace,
+                    store,
+                    query=rag_query if (run_search or rag_query) else "",
+                    top_k=top_k,
                 )
-                st.bar_chart(cdf.set_index("Chunk"))
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Collection", inspection["collectionName"][-16:])
+                m2.metric("Indexed Chunks", inspection["totalChunks"])
+                m3.metric("Embedding Model", inspection["embeddingModel"])
+                m4.metric("Status", inspection["retrievalStatus"])
 
-            for c in chunks:
-                with st.expander(
-                    f"Chunk #{c['chunkIndex']} · Page {c['pageNumber']} · {c['sectionHint']} · Score: {c['score']:.4f}",
-                    expanded=True,
-                ):
-                    st.write(c["text"])
-        except Exception as exc:
-            st.error(str(exc))
+                chunks = inspection.get("retrievedChunks", [])
+                if rag_query and chunks:
+                    cdf = pd.DataFrame(
+                        [
+                            {
+                                "Chunk": f"C#{c['chunk_index']} (P.{c['page_number']})",
+                                "Similarity": c["score"],
+                            }
+                            for c in chunks
+                        ]
+                    )
+                    st.bar_chart(cdf.set_index("Chunk"))
+
+                for c in chunks:
+                    with st.expander(
+                        f"Chunk #{c['chunk_index']} · Page {c['page_number']} · {c['section_hint']} · Score: {c['score']:.4f}",
+                        expanded=True,
+                    ):
+                        st.write(c["text"])
+            except Exception as exc:
+                st.error(str(exc))
 
 # ==============================================================================
 # 11. PROMPT ENGINEERING
 # ==============================================================================
 elif page == "Prompt Engineering":
     st.title("Prompt Engineering & LCEL Architecture")
-    try:
-        specs = api_request("GET", "/api/prompts").get("prompts", [])
-        for spec in specs:
-            with st.expander(f"{spec['agentName']} — {spec['technique']}", expanded=False):
-                st.code(spec["lcelExpression"], language="text")
-                st.markdown("**System Prompt**")
-                st.code(spec["systemPrompt"], language="text")
-                st.markdown("**User PromptTemplate**")
-                st.code(spec["userPromptTemplate"], language="text")
-                st.caption("Input Variables: " + ", ".join(spec.get("inputVariables", [])))
-    except Exception as exc:
-        st.error(str(exc))
+    for spec in get_prompt_specs():
+        with st.expander(f"{spec['agentName']} — {spec['technique']}", expanded=False):
+            st.code(spec["lcelExpression"], language="text")
+            st.markdown("**System Prompt**")
+            st.code(spec["systemPrompt"], language="text")
+            st.markdown("**User PromptTemplate**")
+            st.code(spec["userPromptTemplate"], language="text")
+            st.caption("Input Variables: " + ", ".join(spec.get("inputVariables", [])))
 
 # ==============================================================================
 # 12. SETTINGS
 # ==============================================================================
 elif page == "Settings":
     st.title("Pipeline & Workspace Settings")
-    try:
-        current = api_request("GET", "/api/settings")
-        with st.form("settings_form"):
-            c1, c2 = st.columns(2)
-            with c1:
-                chunk_size = st.number_input("Chunk Size (chars)", 300, 2400, int(current.get("chunkSize", 900)), step=50)
-                top_k = st.number_input("Top-K Chunks", 1, 15, int(current.get("topK", 5)))
-                default_theme = st.selectbox(
-                    "Default Slide Theme",
-                    ["oxford-navy", "slate-academic", "violet-research"],
-                    index=["oxford-navy", "slate-academic", "violet-research"].index(
-                        current.get("defaultSlideTheme", "oxford-navy")
-                    ),
-                )
-            with c2:
-                chunk_overlap = st.number_input("Chunk Overlap (chars)", 0, 500, int(current.get("chunkOverlap", 150)), step=25)
-                default_slides = st.selectbox(
-                    "Default Slide Count",
-                    [8, 10, 12],
-                    index=[8, 10, 12].index(int(current.get("defaultSlideCount", 10))),
-                )
-            if st.form_submit_button("Save Preferences", type="primary"):
-                api_request(
-                    "PUT",
-                    "/api/settings",
-                    json={
-                        "chunkSize": int(chunk_size),
-                        "chunkOverlap": int(chunk_overlap),
-                        "topK": int(top_k),
-                        "defaultSlideCount": int(default_slides),
-                        "defaultSlideTheme": default_theme,
-                    },
-                )
-                st.success("Settings saved.")
-    except Exception as exc:
-        st.error(str(exc))
+    current = st.session_state.settings
+    with st.form("settings_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            chunk_size = st.number_input("Chunk Size (chars)", 300, 2400, int(current.get("chunkSize", 900)), step=50)
+            top_k = st.number_input("Top-K Chunks", 1, 15, int(current.get("topK", 5)))
+            default_theme = st.selectbox(
+                "Default Slide Theme",
+                ["oxford-navy", "slate-academic", "violet-research"],
+                index=["oxford-navy", "slate-academic", "violet-research"].index(
+                    current.get("defaultSlideTheme", "oxford-navy")
+                ),
+            )
+        with c2:
+            chunk_overlap = st.number_input("Chunk Overlap (chars)", 0, 500, int(current.get("chunkOverlap", 150)), step=25)
+            default_slides = st.selectbox(
+                "Default Slide Count",
+                [8, 10, 12],
+                index=[8, 10, 12].index(int(current.get("defaultSlideCount", 10))),
+            )
+        if st.form_submit_button("Save Preferences", type="primary"):
+            st.session_state.settings.update(
+                {
+                    "chunkSize": int(chunk_size),
+                    "chunkOverlap": int(chunk_overlap),
+                    "topK": int(top_k),
+                    "defaultSlideCount": int(default_slides),
+                    "defaultSlideTheme": default_theme,
+                }
+            )
+            st.success("Preferences updated for this session.")
+
+    st.divider()
+    st.subheader("Workspace Maintenance")
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        if workspace and st.button("Clear Active Paper Only", use_container_width=True):
+            clear_single_workspace(workspace["metadata"]["id"])
+            st.success("Active paper removed from session and ChromaDB.")
+            st.rerun()
+    with col_r2:
+        if st.button("Reset Entire Workspace & ChromaDB", use_container_width=True):
+            reset_entire_workspace()
+            st.success("Workspace cleared.")
+            st.rerun()

@@ -2,7 +2,7 @@ from typing import List
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
-from prompts.templates import CONCEPT_PROMPT
+from backend.prompts.templates import CONCEPT_PROMPT
 
 
 class ConceptItem(BaseModel):

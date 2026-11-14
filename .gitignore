@@ -9,6 +9,9 @@ coverage/
 .paperwise_data/
 backend/.venv/
 backend/chroma_db/
+chroma_db/
+.streamlit/secrets.toml
 __pycache__/
 *.pyc
+
 
