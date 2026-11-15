@@ -1,7 +1,7 @@
 # PAPERWISE AI — Research Paper to Presentation & Viva Preparation System
 
 An Agentic AI academic assistant that ingests PDF research papers, indexes page-numbered vector embeddings, routes tasks via Few-Shot Intent Detection, executes four specialized LCEL AI agents powered by Google Gemini, generates downloadable 16:9 PowerPoint decks (`.pptx`) and Word summaries (`.docx`), conducts interactive Viva Voce practice with RAG-verified rubric grading, and exposes full observability via an Agent Activity Monitor, RAG Inspector, and Prompt Engineering Registry.
-
+https://paper-to-presentation-jhmymuktmrnde8pauvg9qj.streamlit.app/#what-is-the-primary-motivation-behind-developing-openreviewer
 ---
 
 ## Architecture & Deployment Modes
